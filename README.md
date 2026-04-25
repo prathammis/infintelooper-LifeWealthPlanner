@@ -2,7 +2,7 @@
 
 Interactive hackathon starter for financial life planning.
 
-## Whatâ€™s in the scaffold
+## What’s in the scaffold
 
 - React 18 + Vite + TypeScript app shell
 - Monthly projection engine with inflation and drawdown handling
