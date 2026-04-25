@@ -7,6 +7,12 @@ import { templates } from './lib/templates';
 import { parseMilestonesCsv } from './lib/csv';
 import { FamilyMember, Milestone, PlanState } from './types';
 
+type AuthMode = 'login' | 'signup';
+type AuthUser = {
+  name: string;
+  email: string;
+};
+
 type SpeechRecognitionInstance = {
   continuous: boolean;
   interimResults: boolean;
@@ -79,6 +85,15 @@ const initialPlan = (): PlanState => {
 const createId = () => Math.random().toString(36).slice(2, 9);
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+const initialUser = (): AuthUser | null => {
+  try {
+    const stored = window.localStorage.getItem('lifewealth-user');
+    return stored ? JSON.parse(stored) as AuthUser : null;
+  } catch {
+    return null;
+  }
+};
 
 function EditorField({
   label,
@@ -154,6 +169,10 @@ export default function App() {
   const [showFamily, setShowFamily] = useState(true);
   const [showEditor, setShowEditor] = useState(false);
   const [showFamilyDrawer, setShowFamilyDrawer] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode>('login');
+  const [authUser, setAuthUser] = useState<AuthUser | null>(initialUser);
+  const [authDraft, setAuthDraft] = useState({ name: 'Pratham', email: '', password: '' });
   const [editorMode, setEditorMode] = useState<'milestone' | 'member'>('milestone');
   const [subscriptionTier, setSubscriptionTier] = useState<'free' | 'premium'>('free');
   const [draftMilestone, setDraftMilestone] = useState<Milestone>({
@@ -267,6 +286,27 @@ export default function App() {
 
     return `${upperPath} ${lowerPath} Z`;
   }, [balanceRange.max, balanceRange.min, conservativeProjection.points, optimisticProjection.points, plan.currentAge, plan.targetAge, viewRange]);
+
+  const yearlyGraph = useMemo(() => {
+    const yearlyPoints = projection.points
+      .filter((point) => point.month % 12 === 0)
+      .slice(0, 18);
+    const maxBalance = Math.max(...yearlyPoints.map((point) => point.balance), plan.currentBalance, 1);
+    const totalInvested = plan.currentBalance + plan.monthlySavings * Math.max(0, projection.points[projection.points.length - 1]?.month ?? 0);
+    const wealthCreated = projection.endingBalance - totalInvested;
+    const positiveEnding = Math.max(0, projection.endingBalance);
+    const investedShare = positiveEnding > 0 ? clamp(totalInvested / positiveEnding, 0, 1) : 0;
+    const growthShare = positiveEnding > 0 ? clamp(Math.max(0, wealthCreated) / positiveEnding, 0, 1) : 0;
+
+    return {
+      yearlyPoints,
+      maxBalance,
+      totalInvested,
+      wealthCreated,
+      investedShare,
+      growthShare,
+    };
+  }, [plan.currentBalance, plan.monthlySavings, projection.endingBalance, projection.points]);
 
   const handlePlanPatch = (patch: Partial<PlanState>) => {
     setPlan((current) => ({ ...current, ...patch }));
@@ -387,6 +427,25 @@ export default function App() {
     setStatusMessage('Exported a print-friendly text plan.');
   };
 
+  const handleAuthSubmit = () => {
+    const email = authDraft.email.trim() || 'demo@lifewealth.app';
+    const name = authMode === 'signup'
+      ? authDraft.name.trim() || email.split('@')[0]
+      : email.split('@')[0] || 'Planner';
+    const user = { name, email };
+
+    setAuthUser(user);
+    window.localStorage.setItem('lifewealth-user', JSON.stringify(user));
+    setShowAuth(false);
+    setStatusMessage(`${authMode === 'signup' ? 'Account created' : 'Signed in'} as ${user.name}.`);
+  };
+
+  const handleSignOut = () => {
+    setAuthUser(null);
+    window.localStorage.removeItem('lifewealth-user');
+    setStatusMessage('Signed out. Your current plan is still visible on this device.');
+  };
+
   const handleCsvImport = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) {
@@ -457,6 +516,35 @@ export default function App() {
           </p>
         </div>
         <div className="hero-actions">
+          <div className="auth-chip">
+            {authUser ? (
+              <>
+                <span>{authUser.name}</span>
+                <button className="button ghost small" onClick={handleSignOut}>Sign out</button>
+              </>
+            ) : (
+              <>
+                <button
+                  className="button ghost small"
+                  onClick={() => {
+                    setAuthMode('login');
+                    setShowAuth(true);
+                  }}
+                >
+                  Login
+                </button>
+                <button
+                  className="button primary small"
+                  onClick={() => {
+                    setAuthMode('signup');
+                    setShowAuth(true);
+                  }}
+                >
+                  Sign up
+                </button>
+              </>
+            )}
+          </div>
           <button className="button primary" onClick={handleAddMilestone}>Add milestone</button>
           <button className="button primary" onClick={() => document.getElementById('wealth-suite')?.scrollIntoView({ behavior: 'smooth' })}>Open wealth suite</button>
           <button className="button ghost" onClick={handleCopyShareLink}>Copy share link</button>
@@ -609,6 +697,58 @@ export default function App() {
             <line x1="56" x2="944" y1="386" y2="386" className="axis-line" />
           </svg>
 
+          <div className="chart-expansion">
+            <div className="mini-chart-card wide">
+              <div className="panel-header compact">
+                <div>
+                  <p className="eyebrow">Growth chart</p>
+                  <h3>Year-wise wealth runway</h3>
+                </div>
+                <strong>{currency.format(projection.endingBalance)}</strong>
+              </div>
+              <div className="wealth-bars">
+                {yearlyGraph.yearlyPoints.map((point) => (
+                  <div className="wealth-bar-column" key={point.month}>
+                    <span
+                      className={point.balance < 0 ? 'wealth-bar negative' : 'wealth-bar'}
+                      style={{ height: `${clamp(Math.abs(point.balance) / yearlyGraph.maxBalance, 0.04, 1) * 100}%` }}
+                      title={`${point.age.toFixed(0)} yrs: ${currency.format(point.balance)}`}
+                    />
+                    <small>{point.age.toFixed(0)}</small>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mini-chart-card">
+              <p className="eyebrow">Split</p>
+              <h3>Invested vs returns</h3>
+              <div className="donut-chart" style={{
+                background: `conic-gradient(#38bdf8 0 ${yearlyGraph.investedShare * 100}%, #34d399 ${yearlyGraph.investedShare * 100}% ${(yearlyGraph.investedShare + yearlyGraph.growthShare) * 100}%, rgba(148, 163, 184, 0.16) ${(yearlyGraph.investedShare + yearlyGraph.growthShare) * 100}% 100%)`,
+              }}>
+                <strong>{percent.format(yearlyGraph.growthShare)}</strong>
+                <span>growth</span>
+              </div>
+              <div className="chart-legend">
+                <span><i className="legend-dot invested" /> Invested {currency.format(yearlyGraph.totalInvested)}</span>
+                <span><i className="legend-dot returns" /> Returns {currency.format(yearlyGraph.wealthCreated)}</span>
+              </div>
+            </div>
+
+            <div className="mini-chart-card">
+              <p className="eyebrow">Milestones</p>
+              <h3>Impact radar</h3>
+              <div className="impact-list">
+                {nextFour.length ? nextFour.map((impact) => (
+                  <div className="impact-row" key={impact.milestoneId}>
+                    <span>{impact.label}</span>
+                    <strong>{impact.gap > 0 ? currency.format(impact.gap) : 'Covered'}</strong>
+                  </div>
+                )) : <p className="empty-state">Add milestones to see impact.</p>}
+              </div>
+            </div>
+          </div>
+
           <div className="insight-grid">
             <div className="insight-card accent">
               <span>Ending balance</span>
@@ -637,6 +777,32 @@ export default function App() {
               <p>{percent.format(plan.annualReturn / 100)} annual growth and {percent.format(plan.inflationRate / 100)} inflation sensitivity.</p>
             </div>
           </div>
+
+          <section className="control-card milestone-editor-card">
+            <div className="panel-header compact">
+              <div>
+                <p className="eyebrow">Milestones</p>
+                <h3>Editor and list</h3>
+              </div>
+            </div>
+            <div className="milestone-list">
+              {plan.milestones.map((milestone) => (
+                <button key={milestone.id} className={milestone.id === selectedMilestoneId ? 'milestone-row active' : 'milestone-row'} onClick={() => setSelectedMilestoneId(milestone.id)}>
+                  <span className="milestone-icon" style={{ background: categoryColors[milestone.category] }}>{milestone.icon}</span>
+                  <div>
+                    <strong>{milestone.label}</strong>
+                    <span>{milestone.age} yrs Â· {currency.format(milestone.cost)} Â· {categoryLabels[milestone.category]}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+            {selectedMilestone && (
+              <div className="selected-summary">
+                <strong>Selected: {selectedMilestone.label}</strong>
+                <span>{selectedMilestone.note ?? 'Drag the marker on the timeline to shift age.'}</span>
+              </div>
+            )}
+          </section>
         </section>
 
         <aside className="control-panel">
@@ -782,6 +948,30 @@ export default function App() {
         </div>
       </section>
 
+      <section className="closing-panel">
+        <div className="closing-copy">
+          <p className="eyebrow">Pink portfolio desk</p>
+          <h2>Keep the plan moving after every milestone.</h2>
+          <p>
+            Review your runway, rebalance savings, and keep the next family goal visible before the numbers drift.
+          </p>
+        </div>
+        <div className="closing-metrics">
+          <article>
+            <span>Projected wealth</span>
+            <strong>{currency.format(projection.endingBalance)}</strong>
+          </article>
+          <article>
+            <span>Monthly savings</span>
+            <strong>{currency.format(plan.monthlySavings)}</strong>
+          </article>
+          <article>
+            <span>Plan horizon</span>
+            <strong>{plan.targetAge - plan.currentAge} yrs</strong>
+          </article>
+        </div>
+      </section>
+
       {showEditor && (
         <div className="modal-backdrop" onClick={() => setShowEditor(false)}>
           <div className="modal-card" onClick={(event) => event.stopPropagation()}>
@@ -844,6 +1034,40 @@ export default function App() {
                 }}
               >
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAuth && (
+        <div className="modal-backdrop" onClick={() => setShowAuth(false)}>
+          <div className="modal-card auth-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="panel-header compact">
+              <div>
+                <p className="eyebrow">Account</p>
+                <h3>{authMode === 'login' ? 'Login to LifeWealth' : 'Create your account'}</h3>
+              </div>
+              <button className="button ghost small" onClick={() => setShowAuth(false)}>Close</button>
+            </div>
+            <div className="auth-tabs">
+              <button className={authMode === 'login' ? 'segmented active' : 'segmented'} onClick={() => setAuthMode('login')}>Login</button>
+              <button className={authMode === 'signup' ? 'segmented active' : 'segmented'} onClick={() => setAuthMode('signup')}>Sign up</button>
+            </div>
+            <div className="editor-grid">
+              {authMode === 'signup' && (
+                <EditorField label="Full name" value={authDraft.name} onChange={(name) => setAuthDraft((current) => ({ ...current, name }))} />
+              )}
+              <EditorField label="Email" value={authDraft.email} onChange={(email) => setAuthDraft((current) => ({ ...current, email }))} type="email" />
+              <EditorField label="Password" value={authDraft.password} onChange={(password) => setAuthDraft((current) => ({ ...current, password }))} type="password" />
+            </div>
+            <div className="auth-note">
+              <strong>Demo auth</strong>
+              <span>This saves a local profile for the prototype. Real backend auth can be connected later.</span>
+            </div>
+            <div className="button-row end">
+              <button className="button primary" onClick={handleAuthSubmit}>
+                {authMode === 'login' ? 'Login' : 'Create account'}
               </button>
             </div>
           </div>
