@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import AdvancedWealthStudio from './components/AdvancedWealthStudio';
 import { downloadSvg, downloadSvgAsPng, downloadText, decodePlan, encodePlan } from './lib/export';
 import { simulatePlan, splitSavingsByMember } from './lib/projection';
 import { suggestMilestone } from './lib/suggestions';
 import { templates } from './lib/templates';
+import { parseMilestonesCsv } from './lib/csv';
 import { FamilyMember, Milestone, PlanState } from './types';
 
 type SpeechRecognitionInstance = {
@@ -153,6 +155,7 @@ export default function App() {
   const [showEditor, setShowEditor] = useState(false);
   const [showFamilyDrawer, setShowFamilyDrawer] = useState(false);
   const [editorMode, setEditorMode] = useState<'milestone' | 'member'>('milestone');
+  const [subscriptionTier, setSubscriptionTier] = useState<'free' | 'premium'>('free');
   const [draftMilestone, setDraftMilestone] = useState<Milestone>({
     id: createId(),
     label: 'New milestone',
@@ -175,6 +178,7 @@ export default function App() {
   const [isListening, setIsListening] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const csvInputRef = useRef<HTMLInputElement | null>(null);
   const speechRecognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
   useEffect(() => {
@@ -182,6 +186,14 @@ export default function App() {
   }, [plan.milestones]);
 
   const projection = useMemo(() => simulatePlan(plan), [plan]);
+  const optimisticProjection = useMemo(
+    () => simulatePlan({ ...plan, annualReturn: Math.min(15, plan.annualReturn + 2) }),
+    [plan],
+  );
+  const conservativeProjection = useMemo(
+    () => simulatePlan({ ...plan, annualReturn: Math.max(1, plan.annualReturn - 2) }),
+    [plan],
+  );
   const savingsSplit = useMemo(() => splitSavingsByMember(plan), [plan]);
 
   const visiblePoints = useMemo(() => {
@@ -226,6 +238,35 @@ export default function App() {
       })
       .join(' ');
   }, [balanceRange, visiblePoints]);
+
+  const riskBandPath = useMemo(() => {
+    const startAge = plan.currentAge;
+    const endAge = viewRange === 'full' ? plan.targetAge : Math.min(plan.targetAge, plan.currentAge + viewRange);
+    const optimisticVisible = optimisticProjection.points.filter((point) => point.age >= startAge && point.age <= endAge);
+    const conservativeVisible = conservativeProjection.points.filter((point) => point.age >= startAge && point.age <= endAge);
+
+    if (optimisticVisible.length < 2 || conservativeVisible.length < 2) {
+      return '';
+    }
+
+    const width = 1000;
+    const height = 420;
+    const padX = 56;
+    const padY = 34;
+    const xScale = (age: number) => padX + ((age - startAge) / Math.max(0.001, endAge - startAge)) * (width - padX * 2);
+    const yScale = (balance: number) => height - padY - ((balance - balanceRange.min) / Math.max(0.001, balanceRange.max - balanceRange.min)) * (height - padY * 2);
+
+    const upperPath = optimisticVisible
+      .map((point, index) => `${index === 0 ? 'M' : 'L'} ${xScale(point.age).toFixed(2)} ${yScale(point.balance).toFixed(2)}`)
+      .join(' ');
+
+    const lowerPath = [...conservativeVisible]
+      .reverse()
+      .map((point) => `L ${xScale(point.age).toFixed(2)} ${yScale(point.balance).toFixed(2)}`)
+      .join(' ');
+
+    return `${upperPath} ${lowerPath} Z`;
+  }, [balanceRange.max, balanceRange.min, conservativeProjection.points, optimisticProjection.points, plan.currentAge, plan.targetAge, viewRange]);
 
   const handlePlanPatch = (patch: Partial<PlanState>) => {
     setPlan((current) => ({ ...current, ...patch }));
@@ -346,6 +387,35 @@ export default function App() {
     setStatusMessage('Exported a print-friendly text plan.');
   };
 
+  const handleCsvImport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const text = await file.text();
+    const parsed = parseMilestonesCsv(text, plan.currentAge);
+
+    if (!parsed.imported.length) {
+      setStatusMessage('No valid milestones found in CSV. Use: label,age,cost,category,icon,note');
+      event.target.value = '';
+      return;
+    }
+
+    setPlan((current) => ({
+      ...current,
+      milestones: [
+        ...current.milestones,
+        ...parsed.imported.map((milestone) => ({ ...milestone, id: createId() })),
+      ],
+    }));
+
+    setStatusMessage(
+      `Imported ${parsed.imported.length} milestone${parsed.imported.length === 1 ? '' : 's'}${parsed.skipped ? `, skipped ${parsed.skipped} invalid row${parsed.skipped === 1 ? '' : 's'}` : ''}.`,
+    );
+    event.target.value = '';
+  };
+
   const updateMilestoneFromPointer = (clientX: number) => {
     if (!draggingId || !svgRef.current) {
       return;
@@ -371,7 +441,10 @@ export default function App() {
     .sort((left, right) => left.age - right.age)
     .slice(0, 4);
 
-  const activeSavingsShortfall = nextFour.find((impact) => impact.gap > 0)?.gap ?? 0;
+  const firstGapImpact = nextFour.find((impact) => impact.gap > 0);
+  const activeSavingsShortfall = firstGapImpact?.gap ?? 0;
+  const monthsToGap = firstGapImpact ? Math.max(1, Math.round((firstGapImpact.age - plan.currentAge) * 12)) : 1;
+  const recommendedIncrease = firstGapImpact ? Math.ceil(firstGapImpact.gap / monthsToGap) : 0;
 
   return (
     <div className="app-shell">
@@ -385,11 +458,39 @@ export default function App() {
         </div>
         <div className="hero-actions">
           <button className="button primary" onClick={handleAddMilestone}>Add milestone</button>
+          <button className="button primary" onClick={() => document.getElementById('wealth-suite')?.scrollIntoView({ behavior: 'smooth' })}>Open wealth suite</button>
           <button className="button ghost" onClick={handleCopyShareLink}>Copy share link</button>
           <button className="button ghost" onClick={() => downloadSvgAsPng(svgRef.current, 'lifewealth-planner.png')}>Export PNG</button>
           <button className="button ghost" onClick={() => downloadSvg(svgRef.current, 'lifewealth-planner.svg')}>Export SVG</button>
         </div>
       </header>
+
+      <section className="premium-preview">
+        <div>
+          <p className="eyebrow">Premium modules added</p>
+          <h2>FIRE, dividends, SIP, SWP, net worth, passive income, goals, DRIP, inflation, retirement, emergency fund, and wealth score.</h2>
+        </div>
+        <div className="premium-preview-actions">
+          <span>{subscriptionTier === 'premium' ? 'Premium unlocked' : 'Some engines locked in Free preview'}</span>
+          <button
+            className="button primary"
+            onClick={() => document.getElementById('wealth-suite')?.scrollIntoView({ behavior: 'smooth' })}
+          >
+            View all 12 features
+          </button>
+        </div>
+      </section>
+
+      <AdvancedWealthStudio
+        currentAge={plan.currentAge}
+        defaultMonthlyIncome={plan.monthlyIncome}
+        defaultMonthlySavings={plan.monthlySavings}
+        tier={subscriptionTier}
+        onUpgrade={() => {
+          setSubscriptionTier('premium');
+          setStatusMessage('Premium wealth engines unlocked: FIRE, dividends, SWP, DRIP, net worth, and AI-style insights.');
+        }}
+      />
 
       <main className="workspace">
         <section className="timeline-panel">
@@ -430,6 +531,10 @@ export default function App() {
                 <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.3" />
                 <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.02" />
               </linearGradient>
+              <linearGradient id="riskBandGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.22" />
+                <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.02" />
+              </linearGradient>
               <filter id="glow">
                 <feGaussianBlur stdDeviation="8" result="coloredBlur" />
                 <feMerge>
@@ -451,6 +556,7 @@ export default function App() {
                 opacity="0.8"
               />
             )}
+            {riskBandPath && <path d={riskBandPath} className="risk-band" fill="url(#riskBandGradient)" />}
             <path d={timelinePath} className="timeline-line" filter="url(#glow)" />
 
             {showFamily && savingsSplit.map(({ member }, index) => {
@@ -513,6 +619,17 @@ export default function App() {
               <span>Shortfall signal</span>
               <strong>{activeSavingsShortfall > 0 ? currency.format(activeSavingsShortfall) : 'None'}</strong>
               <p>{activeSavingsShortfall > 0 ? `Add about ${currency.format(Math.ceil(activeSavingsShortfall / 12))} / month to close the first gap.` : 'Current assumptions keep the first visible step green.'}</p>
+              {activeSavingsShortfall > 0 && (
+                <button
+                  className="button ghost small inline-button"
+                  onClick={() => {
+                    handlePlanPatch({ monthlySavings: plan.monthlySavings + recommendedIncrease });
+                    setStatusMessage(`Raised savings by ${currency.format(recommendedIncrease)} / month to address the nearest gap.`);
+                  }}
+                >
+                  Apply +{currency.format(recommendedIncrease)}/mo
+                </button>
+              )}
             </div>
             <div className="insight-card">
               <span>Target horizon</span>
@@ -556,15 +673,24 @@ export default function App() {
           <section className="control-card">
             <div className="panel-header compact">
               <div>
-                <p className="eyebrow">AI assist</p>
-                <h3>Speech or keyword add</h3>
+                <p className="eyebrow">AI and import</p>
+                <h3>Speech, keyword, and CSV add</h3>
               </div>
             </div>
             <EditorField label="Goal prompt" value={quickGoal} onChange={setQuickGoal} />
             <div className="button-row">
               <button className="button primary" onClick={handleSmartAdd}>Parse goal</button>
               <button className="button ghost" onClick={handleVoiceInput}>{isListening ? 'Stop voice' : 'Voice ready'}</button>
+              <button className="button ghost" onClick={() => csvInputRef.current?.click()}>Import CSV</button>
             </div>
+            <input
+              ref={csvInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden-file-input"
+              onChange={handleCsvImport}
+            />
+            <p className="helper-text">CSV columns: label, age, cost, category, icon, note</p>
           </section>
 
           <section className="control-card">
