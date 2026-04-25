@@ -1,0 +1,124 @@
+.app-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  background: var(--color-sidebar);
+  border-bottom: 1px solid var(--color-border);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-shrink: 0;
+}
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.header-logo { font-size: 24px; }
+.app-header h1 { font-size: 20px; color: var(--color-text); }
+.header-tagline { color: var(--color-text-muted); font-size: 13px; margin-left: auto; }
+
+.app-body {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  flex: 1;
+  overflow: hidden;
+}
+
+.sidebar {
+  background: var(--color-sidebar);
+  border-right: 1px solid var(--color-border);
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.sidebar-divider {
+  border-top: 1px solid var(--color-border);
+  margin: 12px 0;
+}
+
+.main-content {
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Scenario Manager */
+.scenario-manager h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); margin-bottom: 10px; }
+.scenario-list { display: flex; flex-direction: column; gap: 4px; }
+.scenario-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.scenario-item:hover { background: var(--color-surface2); }
+.scenario-item.active { background: var(--color-surface2); }
+.scenario-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.scenario-name { flex: 1; font-size: 13px; }
+.scenario-form { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+
+/* What-If Controls */
+.whatif-controls h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); margin-bottom: 6px; }
+.whatif-subtitle { color: var(--color-text-muted); font-size: 12px; margin: 0 0 12px; }
+.slider-control { margin-bottom: 14px; }
+.slider-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.slider-label { font-size: 12px; color: var(--color-text-muted); }
+.slider-value { font-size: 12px; color: var(--color-primary); font-weight: 600; }
+.slider-range { display: flex; justify-content: space-between; font-size: 10px; color: #555; margin-top: 2px; }
+input[type="range"] {
+  width: 100%; height: 4px;
+  background: var(--color-surface2);
+  border-radius: 2px;
+  border: none;
+  padding: 0;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+/* Milestone List */
+.milestone-list h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); margin-bottom: 10px; }
+.milestone-list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.milestone-list-header h3 { margin-bottom: 0; }
+.milestone-item { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--color-border); }
+.milestone-icon { font-size: 18px; width: 24px; text-align: center; }
+.milestone-info { flex: 1; min-width: 0; }
+.milestone-name { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.milestone-meta { display: block; font-size: 11px; color: var(--color-text-muted); }
+.empty-hint { color: var(--color-text-muted); font-size: 12px; font-style: italic; }
+
+/* Timeline */
+.timeline-container {
+  background: var(--color-surface);
+  border-radius: 12px;
+  padding: 20px;
+  border: 1px solid var(--color-border);
+}
+.section-title { font-size: 16px; color: var(--color-text); margin-bottom: 4px; }
+.section-hint { font-size: 12px; color: var(--color-text-muted); margin: 0 0 12px; }
+.timeline-svg-wrapper { overflow: hidden; border-radius: 6px; }
+.timeline-svg-wrapper svg { display: block; }
+
+/* Projection Chart */
+.projection-chart-container {
+  background: var(--color-surface);
+  border-radius: 12px;
+  padding: 20px;
+  border: 1px solid var(--color-border);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .app-body { grid-template-columns: 1fr; }
+  .sidebar { border-right: none; border-bottom: 1px solid var(--color-border); max-height: 50vh; }
+  .header-tagline { display: none; }
+}
