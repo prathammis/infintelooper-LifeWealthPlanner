@@ -27,7 +27,7 @@ export default function Timeline() {
 
     // Clip path
     svg.append('defs').append('clipPath').attr('id', 'timeline-clip')
-      .append('rect').attr('width', width).attr('height', height);
+      .append('rect').attr('width', width).attr('height', height - margin.top - margin.bottom);
 
     const innerG = g.append('g').attr('clip-path', 'url(#timeline-clip)');
 

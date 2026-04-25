@@ -8,12 +8,13 @@ export function calculateProjection(scenario, startYear, endYear) {
   for (let year = startYear; year <= endYear; year++) {
     const yearsElapsed = year - startYear;
     const inflatedExpenses = annualExpenses * Math.pow(1 + ir, yearsElapsed);
+    // income events add to net worth; goal/event milestones subtract (drawdown)
     const milestoneImpact = milestones
       .filter(m => m.year === year)
-      .reduce((sum, m) => sum + (m.type === 'income' ? -m.cost : m.cost), 0);
+      .reduce((sum, m) => sum + (m.type === 'income' ? m.cost : -m.cost), 0);
 
     const growth = netWorth * rr;
-    netWorth = netWorth + growth + annualIncome - inflatedExpenses - milestoneImpact;
+    netWorth = netWorth + growth + annualIncome - inflatedExpenses + milestoneImpact;
 
     results.push({
       year,
